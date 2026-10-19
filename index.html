@@ -10,7 +10,7 @@
     <!-- Страница авторизации -->
     <div id="authPage" class="auth-container">
       <div class="auth-box">
-        <h1>📁 МойДиск</h1>
+        <h1>МойДиск</h1>
         <h2 id="authTitle">Вход в аккаунт</h2>
 
         <div id="errorMessage" class="error-message hidden"></div>
@@ -38,6 +38,20 @@
               id="passwordInput"
               placeholder="Минимум 6 символов"
               required
+              minlength="6"
+            />
+          </div>
+
+          <div
+            class="form-group"
+            id="confirmPasswordGroup"
+            style="display: none"
+          >
+            <label>Подтвердите пароль</label>
+            <input
+              type="password"
+              id="confirmPasswordInput"
+              placeholder="Повторите пароль"
               minlength="6"
             />
           </div>
@@ -149,6 +163,31 @@
               ></path>
             </svg>
             Файлы
+          </a>
+          <a
+            href="#"
+            class="nav-item"
+            data-section="tasks"
+            onclick="switchSection('tasks', this)"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+              ></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            Задания
+            <span class="badge" id="tasksBadge" style="display: none">0</span>
           </a>
           <a
             href="#"
@@ -353,7 +392,7 @@
         </div>
 
         <!-- Панель инструментов -->
-        <div class="toolbar">
+        <div class="toolbar" id="mainToolbar">
           <button
             class="toolbar-btn btn-primary"
             onclick="showCreateFolderModal()"
@@ -369,6 +408,13 @@
               onchange="uploadFile(event)"
             />
           </label>
+        </div>
+
+        <!-- Панель для заданий -->
+        <div class="toolbar hidden" id="tasksToolbar">
+          <button class="toolbar-btn btn-primary" onclick="showSendTaskModal()">
+            📤 Отправить задание
+          </button>
         </div>
 
         <!-- Область контента -->
@@ -397,6 +443,11 @@
             <h3 class="section-title">📄 Файлы</h3>
             <div id="filesList" class="files-list"></div>
           </div>
+
+          <div id="tasksSection" class="hidden">
+            <h3 class="section-title">Задания</h3>
+            <div id="tasksList" class="tasks-list"></div>
+          </div>
         </div>
       </main>
     </div>
@@ -413,6 +464,52 @@
           <button
             class="btn-modal btn-secondary-modal"
             onclick="closeFolderModal()"
+          >
+            Отмена
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модальное окно отправки задания -->
+    <div id="taskModal" class="modal">
+      <div class="modal-content">
+        <h3>Отправить задание</h3>
+        <div class="form-group">
+          <label>Email получателя</label>
+          <input
+            type="email"
+            id="taskRecipientEmail"
+            placeholder="email@example.com"
+          />
+        </div>
+        <div class="form-group">
+          <label>Название задания</label>
+          <input
+            type="text"
+            id="taskTitle"
+            placeholder="Например: Практическая работа №1"
+          />
+        </div>
+        <div class="form-group">
+          <label>Описание задания</label>
+          <textarea
+            id="taskDescription"
+            placeholder="Опишите задание..."
+            rows="4"
+          ></textarea>
+        </div>
+        <div class="form-group">
+          <label>Срок выполнения</label>
+          <input type="date" id="taskDeadline" />
+        </div>
+        <div class="modal-buttons">
+          <button class="btn-modal btn-primary-modal" onclick="sendTask()">
+            Отправить
+          </button>
+          <button
+            class="btn-modal btn-secondary-modal"
+            onclick="closeTaskModal()"
           >
             Отмена
           </button>
