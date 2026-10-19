@@ -26,6 +26,9 @@ document.getElementById("toggleAuthBtn").onclick = function () {
   document.getElementById("nameGroup").style.display = isLoginMode
     ? "none"
     : "block";
+  document.getElementById("confirmPasswordGroup").style.display = isLoginMode
+    ? "none"
+    : "block";
   document.getElementById("errorMessage").classList.add("hidden");
 };
 
@@ -33,11 +36,13 @@ document.getElementById("toggleAuthBtn").onclick = function () {
 document.getElementById("authForm").onsubmit = function (e) {
   e.preventDefault();
 
-  const email = document.getElementById("emailInput").value;
+  const email = document.getElementById("emailInput").value.trim();
   const password = document.getElementById("passwordInput").value;
-  const name = document.getElementById("nameInput").value;
+  const name = document.getElementById("nameInput").value.trim();
+  const confirmPassword = document.getElementById("confirmPasswordInput").value;
 
   if (isLoginMode) {
+    // Вход
     const users = JSON.parse(localStorage.getItem("users") || "[]");
     const user = users.find(
       (u) => u.email === email && u.password === password,
@@ -51,8 +56,19 @@ document.getElementById("authForm").onsubmit = function (e) {
       showError("Неверный email или пароль");
     }
   } else {
+    // Регистрация
     if (!name) {
       showError("Введите имя");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      showError("Пароли не совпадают");
+      return;
+    }
+
+    if (password.length < 6) {
+      showError("Пароль должен содержать минимум 6 символов");
       return;
     }
 
@@ -70,6 +86,7 @@ document.getElementById("authForm").onsubmit = function (e) {
       name,
       folders: [],
       files: [],
+      tasks: [],
     };
 
     users.push(newUser);
@@ -94,34 +111,35 @@ function showDisk() {
     `Привет, ${currentUser.name}`;
   loadContent();
   updateStorageInfo();
+  updateTasksBadge();
 }
 
 function logout() {
   localStorage.removeItem("currentUser");
   currentUser = null;
   currentFolder = null;
+  currentSection = "files";
   document.getElementById("authPage").style.display = "flex";
   document.getElementById("diskPage").style.display = "none";
   document.getElementById("emailInput").value = "";
   document.getElementById("passwordInput").value = "";
   document.getElementById("nameInput").value = "";
+  document.getElementById("confirmPasswordInput").value = "";
 }
 
 function switchSection(section, element) {
   currentSection = section;
 
-  // Убираем активный класс у всех
   document.querySelectorAll(".nav-item").forEach((item) => {
     item.classList.remove("active");
   });
 
-  // Добавляем активный класс выбранному
   element.classList.add("active");
 
-  // Обновляем путь
   const pathNames = {
     recent: "Последние",
     files: "Мой диск",
+    tasks: "Задания",
     photos: "Фото",
     albums: "Альбомы",
     shared: "Общий доступ",
@@ -135,13 +153,24 @@ function switchSection(section, element) {
   document.getElementById("currentPath").textContent =
     pathNames[section] || "Мой диск";
 
-  // Загружаем контент в зависимости от раздела
+  const mainToolbar = document.getElementById("mainToolbar");
+  const tasksToolbar = document.getElementById("tasksToolbar");
+
+  if (section === "tasks") {
+    mainToolbar.classList.add("hidden");
+    tasksToolbar.classList.remove("hidden");
+    loadTasks();
+  } else {
+    mainToolbar.classList.remove("hidden");
+    tasksToolbar.classList.add("hidden");
+  }
+
   if (section === "files") {
     currentFolder = null;
     loadContent();
   } else if (section === "trash") {
     showTrash();
-  } else {
+  } else if (section !== "tasks") {
     showSectionPlaceholder(section);
   }
 }
@@ -150,10 +179,12 @@ function showSectionPlaceholder(section) {
   const emptyState = document.getElementById("emptyState");
   const foldersSection = document.getElementById("foldersSection");
   const filesSection = document.getElementById("filesSection");
+  const tasksSection = document.getElementById("tasksSection");
 
   emptyState.classList.remove("hidden");
   foldersSection.classList.add("hidden");
   filesSection.classList.add("hidden");
+  tasksSection.classList.add("hidden");
 
   const titles = {
     recent: "Последние файлы",
@@ -175,10 +206,12 @@ function showTrash() {
   const emptyState = document.getElementById("emptyState");
   const foldersSection = document.getElementById("foldersSection");
   const filesSection = document.getElementById("filesSection");
+  const tasksSection = document.getElementById("tasksSection");
 
   emptyState.classList.remove("hidden");
   foldersSection.classList.add("hidden");
   filesSection.classList.add("hidden");
+  tasksSection.classList.add("hidden");
 
   emptyState.querySelector("h3").textContent = "Корзина пуста";
   emptyState.querySelector("p").textContent =
@@ -200,6 +233,9 @@ function loadContent() {
   const emptyState = document.getElementById("emptyState");
   const foldersSection = document.getElementById("foldersSection");
   const filesSection = document.getElementById("filesSection");
+  const tasksSection = document.getElementById("tasksSection");
+
+  tasksSection.classList.add("hidden");
 
   if (folders.length === 0 && files.length === 0) {
     emptyState.classList.remove("hidden");
@@ -226,6 +262,84 @@ function loadContent() {
   updateStorageInfo();
 }
 
+function loadTasks() {
+  const users = JSON.parse(localStorage.getItem("users") || "[]");
+  const user = users.find((u) => u.id === currentUser.id);
+
+  if (!user) return;
+
+  const tasks = user.tasks || [];
+
+  const emptyState = document.getElementById("emptyState");
+  const foldersSection = document.getElementById("foldersSection");
+  const filesSection = document.getElementById("filesSection");
+  const tasksSection = document.getElementById("tasksSection");
+
+  emptyState.classList.add("hidden");
+  foldersSection.classList.add("hidden");
+  filesSection.classList.add("hidden");
+
+  if (tasks.length === 0) {
+    emptyState.classList.remove("hidden");
+    tasksSection.classList.add("hidden");
+    emptyState.querySelector("h3").textContent = "Нет заданий";
+    emptyState.querySelector("p").textContent =
+      "Преподаватель ещё не отправил вам задания";
+  } else {
+    tasksSection.classList.remove("hidden");
+    renderTasks(tasks);
+  }
+}
+
+function renderTasks(tasks) {
+  const list = document.getElementById("tasksList");
+  list.innerHTML = tasks
+    .map(
+      (task) => `
+        <div class="task-item">
+            <div class="task-header">
+                <div class="task-title">📋 ${task.title}</div>
+                ${task.deadline ? `<div class="task-deadline">📅 Срок: ${formatDate(task.deadline)}</div>` : ""}
+            </div>
+            <div class="task-sender">От: ${task.senderName} (${task.senderEmail})</div>
+            <div class="task-description">${task.description}</div>
+            <div class="task-actions">
+                <button class="action-btn delete" onclick="deleteTask(${task.id})">Удалить</button>
+            </div>
+        </div>
+    `,
+    )
+    .join("");
+}
+
+function formatDate(dateString) {
+  const date = new Date(dateString);
+  return date.toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function updateTasksBadge() {
+  if (!currentUser) return;
+
+  const users = JSON.parse(localStorage.getItem("users") || "[]");
+  const user = users.find((u) => u.id === currentUser.id);
+
+  if (!user) return;
+
+  const tasks = user.tasks || [];
+  const badge = document.getElementById("tasksBadge");
+
+  if (tasks.length > 0) {
+    badge.textContent = tasks.length;
+    badge.style.display = "flex";
+  } else {
+    badge.style.display = "none";
+  }
+}
+
 function updateStorageInfo() {
   const users = JSON.parse(localStorage.getItem("users") || "[]");
   const user = users.find((u) => u.id === currentUser.id);
@@ -237,14 +351,14 @@ function updateStorageInfo() {
     totalSize += file.size;
   });
 
-  const totalGB = 5 * 1024 * 1024 * 1024; // 5 ГБ в байтах
+  const totalGB = 5 * 1024 * 1024 * 1024;
   const percentage = (totalSize / totalGB) * 100;
 
   const storageBarFill = document.querySelector(".storage-bar-fill");
   const storageText = document.querySelector(".storage-text");
 
   if (storageBarFill) {
-    storageBarFill.style.width = percentage + "%";
+    storageBarFill.style.width = Math.max(percentage, 0.26) + "%";
   }
 
   if (storageText) {
@@ -259,7 +373,7 @@ function renderFolders(folders) {
     .map(
       (folder) => `
         <div class="folder-item" ondblclick="openFolder(${folder.id})">
-            <div class="folder-icon">📁</div>
+            <div class="folder-icon"></div>
             <div class="folder-name">${folder.name}</div>
         </div>
     `,
@@ -290,10 +404,10 @@ function renderFiles(files) {
 }
 
 function getFileIcon(type) {
-  if (type.startsWith("image/")) return "🖼️";
+  if (type.startsWith("image/")) return "️";
   if (type.startsWith("video/")) return "🎬";
   if (type.startsWith("audio/")) return "🎵";
-  if (type.includes("pdf")) return "📕";
+  if (type.includes("pdf")) return "";
   if (type.includes("zip") || type.includes("rar")) return "📦";
   return "📄";
 }
@@ -410,11 +524,100 @@ function deleteFile(fileId) {
   loadContent();
 }
 
-// Закрытие модального окна при клике вне его
+function deleteTask(taskId) {
+  if (!confirm("Удалить задание?")) return;
+
+  const users = JSON.parse(localStorage.getItem("users") || "[]");
+  const user = users.find((u) => u.id === currentUser.id);
+  user.tasks = user.tasks.filter((t) => t.id !== taskId);
+
+  localStorage.setItem("users", JSON.stringify(users));
+  currentUser = user;
+  localStorage.setItem("currentUser", JSON.stringify(user));
+
+  loadTasks();
+  updateTasksBadge();
+}
+
+// ==================== ОТПРАВКА ЗАДАНИЙ ====================
+
+function showSendTaskModal() {
+  document.getElementById("taskModal").style.display = "flex";
+  document.getElementById("taskRecipientEmail").value = "";
+  document.getElementById("taskTitle").value = "";
+  document.getElementById("taskDescription").value = "";
+  document.getElementById("taskDeadline").value = "";
+  document.getElementById("taskRecipientEmail").focus();
+}
+
+function closeTaskModal() {
+  document.getElementById("taskModal").style.display = "none";
+}
+
+function sendTask() {
+  const recipientEmail = document
+    .getElementById("taskRecipientEmail")
+    .value.trim();
+  const title = document.getElementById("taskTitle").value.trim();
+  const description = document.getElementById("taskDescription").value.trim();
+  const deadline = document.getElementById("taskDeadline").value;
+
+  if (!recipientEmail) {
+    alert("Введите email получателя");
+    return;
+  }
+
+  if (!title) {
+    alert("Введите название задания");
+    return;
+  }
+
+  if (!description) {
+    alert("Введите описание задания");
+    return;
+  }
+
+  const users = JSON.parse(localStorage.getItem("users") || "[]");
+  const recipient = users.find((u) => u.email === recipientEmail);
+
+  if (!recipient) {
+    alert(
+      "Пользователь с таким email не найден. Убедитесь, что преподаватель зарегистрирован в системе.",
+    );
+    return;
+  }
+
+  if (!recipient.tasks) {
+    recipient.tasks = [];
+  }
+
+  recipient.tasks.push({
+    id: Date.now(),
+    title,
+    description,
+    deadline,
+    senderEmail: currentUser.email,
+    senderName: currentUser.name,
+    createdAt: new Date().toISOString(),
+  });
+
+  localStorage.setItem("users", JSON.stringify(users));
+
+  alert(
+    `Задание "${title}" успешно отправлено пользователю ${recipient.name}!`,
+  );
+  closeTaskModal();
+}
+
+// Закрытие модальных окон при клике вне их
 window.onclick = function (event) {
-  const modal = document.getElementById("folderModal");
-  if (event.target === modal) {
+  const folderModal = document.getElementById("folderModal");
+  const taskModal = document.getElementById("taskModal");
+  if (event.target === folderModal) {
     closeFolderModal();
+  }
+  if (event.target === taskModal) {
+    closeTaskModal();
   }
 };
 
@@ -424,3 +627,4 @@ document.getElementById("folderNameInput").onkeypress = function (e) {
     createFolder();
   }
 };
+
