@@ -1,533 +1,396 @@
+// ================= НАСТРОЙКИ БАЗЫ ДАННЫХ =================
+// Ваша ссылка на jsonblob (уже вставлена)
 const DB_URL =
   "https://jsonblob.com/api/jsonBlob/01a158b7-d34a-79d1-9bf4-81e33768397f";
-// =================================================================
 
-firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const db = firebase.firestore();
+// Email и пароль владельца (преподавателя), который видит всё
+const OWNER_EMAIL = "owner@disk.com";
+const OWNER_PASSWORD = "owner123";
+// =========================================================
 
+let db = { users: [], folders: [] };
 let currentUser = null;
-let currentUserData = null;
-let currentView = "recent";
-let selectedShareFile = null;
+let useLocalStorageFallback = false; // Включится автоматически, если jsonblob заблокирует запрос (CORS)
 
-// ==================== АВТОРИЗАЦИЯ ====================
-
-auth.onAuthStateChanged(async (user) => {
-  if (user) {
-    const userDoc = await db.collection("users").doc(user.uid).get();
-    if (userDoc.exists) {
-      currentUserData = userDoc.data();
-      currentUser = { uid: user.uid, email: user.email, ...currentUserData };
-      showDisk();
-    }
-  } else {
-    currentUser = null;
-    currentUserData = null;
-    document.getElementById("authPage").style.display = "flex";
-    document.getElementById("diskPage").classList.add("hidden");
+// --- РАБОТА С БАЗОЙ ДАННЫХ ---
+async function loadDB() {
+  if (useLocalStorageFallback) {
+    const saved = localStorage.getItem("mockDiskDB");
+    if (saved) db = JSON.parse(saved);
+    return;
   }
+  try {
+    const response = await fetch(DB_URL);
+    if (!response.ok) throw new Error("Network error");
+    db = await response.json();
+    // Инициализация структуры, если база пустая
+    if (!db.users) db.users = [];
+    if (!db.folders) db.folders = [];
+  } catch (error) {
+    console.warn(
+      "Jsonblob заблокировал запрос (CORS). Переключаюсь на локальный режим демонстрации.",
+      error,
+    );
+    useLocalStorageFallback = true;
+    const saved = localStorage.getItem("mockDiskDB");
+    if (saved) {
+      db = JSON.parse(saved);
+    } else {
+      db = { users: [], folders: [] };
+      // Создаем владельца по умолчанию для демонстрации
+      createUserInDB("Преподаватель", OWNER_EMAIL, OWNER_PASSWORD, true);
+    }
+  }
+}
+
+async function saveDB() {
+  if (useLocalStorageFallback) {
+    localStorage.setItem("mockDiskDB", JSON.stringify(db));
+    return;
+  }
+  try {
+    await fetch(DB_URL, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(db),
+    });
+  } catch (error) {
+    console.error("Ошибка сохранения:", error);
+    alert(
+      "Не удалось сохранить данные в облако. Проверьте интернет или используйте локальный режим.",
+    );
+  }
+}
+
+// --- ЛОГИКА ПОЛЬЗОВАТЕЛЕЙ И ПАПОК ---
+function createUserInDB(name, email, password, isOwner = false) {
+  const userId = "user_" + Date.now();
+  const newUser = { id: userId, name, email, password, isOwner };
+  db.users.push(newUser);
+
+  // АВТОМАТИЧЕСКОЕ СОЗДАНИЕ ПАПКИ С ИМЕНЕМ ПОЛЬЗОВАТЕЛЯ
+  const newFolder = {
+    id: "folder_" + Date.now(),
+    name: name, // Имя папки = Имя пользователя
+    ownerId: userId,
+    ownerName: name,
+    files: [],
+  };
+  db.folders.push(newFolder);
+  return newUser;
+}
+
+// --- ИНТЕРФЕЙС И АВТОРИЗАЦИЯ ---
+let isRegisterMode = false;
+
+document.getElementById("toggleAuthBtn").addEventListener("click", () => {
+  isRegisterMode = !isRegisterMode;
+  document.getElementById("authTitle").textContent = isRegisterMode
+    ? "Регистрация"
+    : "Вход в систему";
+  document.getElementById("authBtn").textContent = isRegisterMode
+    ? "Зарегистрироваться"
+    : "Войти";
+  document.getElementById("toggleAuthBtn").textContent = isRegisterMode
+    ? "Уже есть аккаунт? Войти"
+    : "Нет аккаунта? Зарегистрироваться";
+  document
+    .getElementById("nameGroup")
+    .classList.toggle("hidden", !isRegisterMode);
+  document
+    .getElementById("confirmPasswordGroup")
+    .classList.toggle("hidden", !isRegisterMode);
+  showMessage("");
 });
 
-document.getElementById("toggleAuthBtn").onclick = function () {
-  const isLogin = this.textContent === "Создать аккаунт";
-  document.getElementById("authTitle").textContent = isLogin
-    ? "Вход в аккаунт"
-    : "Регистрация";
-  document.getElementById("authBtn").textContent = isLogin
-    ? "Войти"
-    : "Зарегистрироваться";
-  this.textContent = isLogin ? "Создать аккаунт" : "Уже есть аккаунт? Войти";
-  document.getElementById("nameGroup").style.display = isLogin
-    ? "none"
-    : "block";
-  document.getElementById("confirmPasswordGroup").style.display = isLogin
-    ? "none"
-    : "block";
-  document.getElementById("errorMessage").classList.add("hidden");
-};
-
-document.getElementById("authForm").onsubmit = async function (e) {
+document.getElementById("authForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  showMessage("Загрузка...", "success");
+  await loadDB();
 
-  const email = document.getElementById("emailInput").value.trim();
+  const email = document
+    .getElementById("emailInput")
+    .value.trim()
+    .toLowerCase();
   const password = document.getElementById("passwordInput").value;
   const name = document.getElementById("nameInput").value.trim();
   const confirmPassword = document.getElementById("confirmPasswordInput").value;
-  const isLogin = document.getElementById("authBtn").textContent === "Войти";
 
-  try {
-    if (isLogin) {
-      await auth.signInWithEmailAndPassword(email, password);
-    } else {
-      if (!name) {
-        showError("Введите имя");
-        return;
-      }
-      if (password !== confirmPassword) {
-        showError("Пароли не совпадают");
-        return;
-      }
-      if (password.length < 6) {
-        showError("Пароль минимум 6 символов");
-        return;
-      }
+  if (isRegisterMode) {
+    if (!name) return showMessage("Введите ваше имя", "error");
+    if (password !== confirmPassword)
+      return showMessage("Пароли не совпадают", "error");
+    if (password.length < 4)
+      return showMessage("Пароль минимум 4 символа", "error");
+    if (db.users.find((u) => u.email === email))
+      return showMessage("Этот email уже занят", "error");
 
-      const userCredential = await auth.createUserWithEmailAndPassword(
-        email,
-        password,
-      );
-      const uid = userCredential.user.uid;
-
-      // Создаем документ пользователя
-      await db
-        .collection("users")
-        .doc(uid)
-        .set({
-          name: name,
-          email: email,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          files: [],
-          folders: [{ id: "folder_" + Date.now(), name: name, ownerId: uid }],
-        });
+    const newUser = createUserInDB(name, email, password, false);
+    await saveDB();
+    login(newUser);
+  } else {
+    // Проверка на владельца (преподавателя)
+    if (email === OWNER_EMAIL && password === OWNER_PASSWORD) {
+      let owner = db.users.find((u) => u.email === OWNER_EMAIL);
+      if (!owner) {
+        owner = createUserInDB(
+          "Преподаватель",
+          OWNER_EMAIL,
+          OWNER_PASSWORD,
+          true,
+        );
+        await saveDB();
+      }
+      login(owner);
+      return;
     }
-  } catch (error) {
-    let message = "Ошибка";
-    if (error.code === "auth/email-already-in-use")
-      message = "Email уже зарегистрирован";
-    else if (error.code === "auth/weak-password")
-      message = "Пароль слишком слабый";
-    else if (error.code === "auth/user-not-found")
-      message = "Пользователь не найден";
-    else if (error.code === "auth/wrong-password") message = "Неверный пароль";
-    showError(message);
+
+    const user = db.users.find(
+      (u) => u.email === email && u.password === password,
+    );
+    if (user) {
+      login(user);
+    } else {
+      showMessage("Неверный email или пароль", "error");
+    }
+  }
+});
+
+function login(user) {
+  currentUser = user;
+  localStorage.setItem("currentUser", JSON.stringify(user));
+  document.getElementById("authScreen").classList.remove("active");
+  document.getElementById("diskScreen").classList.add("active");
+
+  document.getElementById("displayUserName").textContent = user.name;
+  document.getElementById("displayUserEmail").textContent = user.email;
+
+  // Настройка интерфейса в зависимости от роли
+  if (user.isOwner) {
+    document.getElementById("navAllFolders").classList.remove("hidden");
+    document.getElementById("navMyFolder").classList.add("hidden");
+    document.getElementById("uploadBtn").classList.add("hidden"); // Владелец только смотрит
+    showAllFolders();
+  } else {
+    document.getElementById("navAllFolders").classList.add("hidden");
+    document.getElementById("navMyFolder").classList.remove("hidden");
+    document.getElementById("navMyFolder").classList.add("active");
+    document.getElementById("uploadBtn").classList.remove("hidden");
+    showMyFolder();
+  }
+}
+
+function logout() {
+  currentUser = null;
+  localStorage.removeItem("currentUser");
+  document.getElementById("diskScreen").classList.remove("active");
+  document.getElementById("authScreen").classList.add("active");
+  document.getElementById("authForm").reset();
+  showMessage("");
+}
+
+// --- ОТОБРАЖЕНИЕ ДАННЫХ ---
+async function showMyFolder() {
+  await loadDB();
+  document.getElementById("pageTitle").textContent =
+    `Моя папка: ${currentUser.name}`;
+  const myFolder = db.folders.find((f) => f.ownerId === currentUser.id);
+  renderItems(myFolder ? myFolder.files : [], false);
+}
+
+async function showAllFolders() {
+  await loadDB();
+  document.getElementById("pageTitle").textContent =
+    "Все папки пользователей (Режим Преподавателя)";
+  renderFolders(db.folders);
+}
+
+function renderItems(files, showOwnerName) {
+  const grid = document.getElementById("itemsGrid");
+  const empty = document.getElementById("emptyState");
+  grid.innerHTML = "";
+
+  if (!files || files.length === 0) {
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+
+  files.forEach((file) => {
+    const card = document.createElement("div");
+    card.className = "item-card";
+    card.innerHTML = `
+            <div class="item-icon">${getFileIcon(file.type)}</div>
+            <div class="item-name">${file.name}</div>
+            <div class="item-meta">${formatSize(file.size)}</div>
+            ${showOwnerName ? `<div class="item-owner">Владелец: ${file.ownerName}</div>` : ""}
+            <div class="item-actions">
+                <button class="btn-small btn-download" onclick="downloadFile('${file.id}')">Скачать</button>
+                ${!currentUser.isOwner ? `<button class="btn-small btn-delete" onclick="deleteFile('${file.id}')">Удалить</button>` : ""}
+            </div>
+        `;
+    grid.appendChild(card);
+  });
+}
+
+function renderFolders(folders) {
+  const grid = document.getElementById("itemsGrid");
+  const empty = document.getElementById("emptyState");
+  grid.innerHTML = "";
+
+  if (folders.length === 0) {
+    empty.classList.remove("hidden");
+    document.querySelector("#emptyState h3").textContent =
+      "Нет зарегистрированных пользователей";
+    return;
+  }
+  empty.classList.add("hidden");
+  document.querySelector("#emptyState h3").textContent = "Папка пуста"; // сброс текста
+
+  folders.forEach((folder) => {
+    const card = document.createElement("div");
+    card.className = "item-card";
+    card.style.cursor = "pointer";
+    card.onclick = (e) => {
+      if (!e.target.closest("button")) viewFolderContents(folder);
+    };
+
+    card.innerHTML = `
+            <div class="item-icon">📁</div>
+            <div class="item-name">${folder.name}</div>
+            <div class="item-meta">Файлов: ${folder.files ? folder.files.length : 0}</div>
+            <div class="item-owner">Студент: ${folder.ownerName}</div>
+            <div class="item-actions">
+                <button class="btn-small btn-open" onclick="event.stopPropagation(); viewFolderContents(db.folders.find(f=>f.id==='${folder.id}'))">Открыть</button>
+            </div>
+        `;
+    grid.appendChild(card);
+  });
+}
+
+function viewFolderContents(folder) {
+  document.getElementById("pageTitle").textContent =
+    `Папка: ${folder.name} (Студент: ${folder.ownerName})`;
+  const uploadBtn = document.getElementById("uploadBtn");
+  const originalText = uploadBtn.textContent;
+  uploadBtn.textContent = "← Назад ко всем папкам";
+  uploadBtn.onclick = () => {
+    uploadBtn.textContent = originalText;
+    uploadBtn.onclick = () => document.getElementById("fileInput").click();
+    showAllFolders();
+  };
+
+  renderItems(folder.files, true);
+  window.currentViewFolder = folder;
+}
+
+// --- ЗАГРУЗКА И УПРАВЛЕНИЕ ФАЙЛАМИ ---
+async function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  if (file.size > 2 * 1024 * 1024) {
+    alert(
+      "Файл слишком большой! Максимум 2 МБ (ограничение демо-режима для JSON).",
+    );
+    event.target.value = "";
+    return;
+  }
+
+  showMessage("Загрузка файла...", "success");
+  const reader = new FileReader();
+
+  reader.onload = async (e) => {
+    await loadDB();
+    const myFolder = db.folders.find((f) => f.ownerId === currentUser.id);
+
+    const newFile = {
+      id: "file_" + Date.now(),
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      data: e.target.result, // Base64 данные файла
+      ownerName: currentUser.name,
+      ownerId: currentUser.id,
+    };
+
+    myFolder.files.push(newFile);
+    await saveDB();
+    showMessage("Файл успешно загружен!", "success");
+    showMyFolder();
+    event.target.value = "";
+  };
+
+  reader.readAsDataURL(file);
+}
+
+window.downloadFile = function (fileId) {
+  let file;
+  if (window.currentViewFolder) {
+    file = window.currentViewFolder.files.find((f) => f.id === fileId);
+  } else {
+    const myFolder = db.folders.find((f) => f.ownerId === currentUser.id);
+    file = myFolder.files.find((f) => f.id === fileId);
+  }
+
+  if (file && file.data) {
+    const a = document.createElement("a");
+    a.href = file.data;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
 };
 
-function showError(message) {
-  const errorDiv = document.getElementById("errorMessage");
-  errorDiv.textContent = message;
-  errorDiv.classList.remove("hidden");
-}
+window.deleteFile = async function (fileId) {
+  if (!confirm("Удалить этот файл?")) return;
+  await loadDB();
+  const myFolder = db.folders.find((f) => f.ownerId === currentUser.id);
+  myFolder.files = myFolder.files.filter((f) => f.id !== fileId);
+  await saveDB();
+  showMyFolder();
+};
 
-function showDisk() {
-  document.getElementById("authPage").style.display = "none";
-  document.getElementById("diskPage").classList.remove("hidden");
-  document.getElementById("userName").textContent = currentUserData.name;
-  updateStorageInfo();
-  loadCurrentView();
-  updateSharedBadge();
-}
-
-async function logout() {
-  await auth.signOut();
-  document.getElementById("emailInput").value = "";
-  document.getElementById("passwordInput").value = "";
-  document.getElementById("nameInput").value = "";
-  document.getElementById("confirmPasswordInput").value = "";
-}
-
-// ==================== НАВИГАЦИЯ ====================
-
-function switchView(view, element) {
-  currentView = view;
-
-  document
-    .querySelectorAll(".nav-item")
-    .forEach((item) => item.classList.remove("active"));
-  element.classList.add("active");
-
-  const pathNames = {
-    recent: "Последние",
-    files: "Файлы",
-    shared: "Общие файлы",
-    trash: "Корзина",
-  };
-
-  document.getElementById("currentPath").textContent = pathNames[view];
-  loadCurrentView();
-}
-
-async function loadCurrentView() {
-  if (!currentUser) return;
-
-  const userDoc = await db.collection("users").doc(currentUser.uid).get();
-  if (!userDoc.exists) return;
-
-  currentUserData = userDoc.data();
-
-  const emptyState = document.getElementById("emptyState");
-  const filesGrid = document.getElementById("filesGrid");
-  filesGrid.innerHTML = "";
-
-  if (currentView === "recent" || currentView === "files") {
-    const allFiles = [];
-    const folders = currentUserData.folders || [];
-
-    folders.forEach((folder) => {
-      if (folder.files) {
-        folder.files.forEach((file) => {
-          allFiles.push({ ...file, folderName: folder.name });
-        });
-      }
-    });
-
-    if (allFiles.length === 0) {
-      emptyState.classList.remove("hidden");
-      filesGrid.classList.add("hidden");
-    } else {
-      emptyState.classList.add("hidden");
-      filesGrid.classList.remove("hidden");
-      renderFiles(allFiles);
-    }
-  } else if (currentView === "shared") {
-    // Загружаем файлы, отправленные этому пользователю
-    const sharedSnapshot = await db
-      .collection("sharedFiles")
-      .where("recipientId", "==", currentUser.uid)
-      .orderBy("uploadedAt", "desc")
-      .get();
-
-    const sharedFiles = [];
-    sharedSnapshot.forEach((doc) => {
-      sharedFiles.push({ id: doc.id, ...doc.data() });
-    });
-
-    if (sharedFiles.length === 0) {
-      emptyState.classList.remove("hidden");
-      filesGrid.classList.add("hidden");
-      emptyState.querySelector("h3").textContent = "Нет общих файлов";
-      emptyState.querySelector("p").textContent =
-        "Другие пользователи ещё не отправляли вам файлы";
-    } else {
-      emptyState.classList.add("hidden");
-      filesGrid.classList.remove("hidden");
-      renderSharedFiles(sharedFiles);
-    }
-  } else if (currentView === "trash") {
-    emptyState.classList.remove("hidden");
-    filesGrid.classList.add("hidden");
-    emptyState.querySelector("h3").textContent = "Корзина пуста";
-    emptyState.querySelector("p").textContent =
-      "Удаленные файлы будут отображаться здесь";
-  }
-}
-
-function renderFiles(files) {
-  const grid = document.getElementById("filesGrid");
-  grid.innerHTML = files
-    .map(
-      (file) => `
-        <div class="file-card">
-            <div class="file-card-icon">${getFileIcon(file.type)}</div>
-            <div class="file-card-name">${file.name}</div>
-            <div class="file-card-meta">${formatSize(file.size)}</div>
-            <div class="file-card-actions">
-                <button class="action-btn download" onclick="downloadFile('${file.id}')">Скачать</button>
-                <button class="action-btn delete" onclick="deleteFile('${file.id}')">Удалить</button>
-            </div>
-        </div>
-    `,
-    )
-    .join("");
-}
-
-function renderSharedFiles(files) {
-  const grid = document.getElementById("filesGrid");
-  grid.innerHTML = files
-    .map(
-      (file) => `
-        <div class="file-card">
-            <div class="file-card-icon">${getFileIcon(file.type)}</div>
-            <div class="file-card-name">${file.name}</div>
-            <div class="file-card-meta">${formatSize(file.size)}</div>
-            <div class="file-card-sender">От: ${file.senderName}</div>
-            <div class="file-card-actions">
-                <button class="action-btn download" onclick="downloadSharedFile('${file.id}')">Скачать</button>
-                <button class="action-btn delete" onclick="deleteSharedFile('${file.id}')">Удалить</button>
-            </div>
-        </div>
-    `,
-    )
-    .join("");
-}
-
+// --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 function getFileIcon(type) {
   if (!type) return "📄";
-  if (type.startsWith("image/")) return "🖼️";
-  if (type.startsWith("video/")) return "";
-  if (type.startsWith("audio/")) return "🎵";
+  if (type.includes("image")) return "🖼️";
   if (type.includes("pdf")) return "📕";
-  if (
-    type.includes("word") ||
-    type.includes("document") ||
-    type.includes("msword")
-  )
-    return "📘";
+  if (type.includes("word") || type.includes("document")) return "📘";
+  if (type.includes("excel") || type.includes("sheet")) return "📊";
   if (type.includes("zip") || type.includes("rar")) return "📦";
   return "📄";
 }
 
 function formatSize(bytes) {
-  if (!bytes) return "0 Б";
-  if (bytes < 1024) return bytes + " Б";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " КБ";
-  return (bytes / (1024 * 1024)).toFixed(1) + " МБ";
+  if (bytes === 0) return "0 Б";
+  const k = 1024;
+  const sizes = ["Б", "КБ", "МБ", "ГБ"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
 
-function updateStorageInfo() {
-  let totalSize = 0;
-  const folders = currentUserData.folders || [];
-  folders.forEach((folder) => {
-    if (folder.files) {
-      folder.files.forEach((file) => {
-        totalSize += file.size || 0;
-      });
+function showMessage(text, type = "") {
+  const el = document.getElementById("authMessage");
+  el.textContent = text;
+  el.className =
+    "message " +
+    (type === "error" ? "error" : type === "success" ? "success" : "hidden");
+  if (!text) el.classList.add("hidden");
+}
+
+// --- ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ ---
+window.addEventListener("DOMContentLoaded", async () => {
+  await loadDB();
+  const savedUser = localStorage.getItem("currentUser");
+  if (savedUser) {
+    const user = JSON.parse(savedUser);
+    const exists = db.users.find((u) => u.id === user.id);
+    if (exists) {
+      login(exists);
+    } else {
+      localStorage.removeItem("currentUser");
     }
-  });
-
-  const totalGB = 5 * 1024 * 1024 * 1024;
-  const percentage = (totalSize / totalGB) * 100;
-
-  document.getElementById("storageBar").style.width =
-    Math.max(percentage, 0.1) + "%";
-  document.getElementById("storageText").textContent =
-    `${(totalSize / (1024 * 1024)).toFixed(1)} МБ из 5 ГБ`;
-}
-
-async function updateSharedBadge() {
-  if (!currentUser) return;
-
-  const snapshot = await db
-    .collection("sharedFiles")
-    .where("recipientId", "==", currentUser.uid)
-    .get();
-
-  const count = snapshot.size;
-  const badge = document.getElementById("sharedBadge");
-
-  if (count > 0) {
-    badge.textContent = count;
-    badge.style.display = "flex";
-  } else {
-    badge.style.display = "none";
   }
-}
-
-// ==================== ЗАГРУЗКА ФАЙЛОВ ====================
-
-async function handleFileUpload(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  if (file.size > 5 * 1024 * 1024) {
-    alert("Файл слишком большой! Максимум 5 МБ");
-    event.target.value = "";
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = async function (e) {
-    const fileObj = {
-      id: "file_" + Date.now(),
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      data: e.target.result,
-      uploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    };
-
-    // Добавляем файл в первую папку пользователя (папку с его именем)
-    const folders = currentUserData.folders || [];
-    if (folders.length > 0) {
-      if (!folders[0].files) folders[0].files = [];
-      folders[0].files.push(fileObj);
-
-      await db.collection("users").doc(currentUser.uid).update({
-        folders: folders,
-      });
-    }
-
-    loadCurrentView();
-    updateStorageInfo();
-  };
-  reader.readAsDataURL(file);
-  event.target.value = "";
-}
-
-function downloadFile(fileId) {
-  const folders = currentUserData.folders || [];
-  let file = null;
-
-  folders.forEach((folder) => {
-    if (folder.files) {
-      const found = folder.files.find((f) => f.id === fileId);
-      if (found) file = found;
-    }
-  });
-
-  if (file && file.data) {
-    const link = document.createElement("a");
-    link.href = file.data;
-    link.download = file.name;
-    link.click();
-  }
-}
-
-async function deleteFile(fileId) {
-  if (!confirm("Удалить файл?")) return;
-
-  const folders = currentUserData.folders || [];
-  folders.forEach((folder) => {
-    if (folder.files) {
-      folder.files = folder.files.filter((f) => f.id !== fileId);
-    }
-  });
-
-  await db
-    .collection("users")
-    .doc(currentUser.uid)
-    .update({ folders: folders });
-  loadCurrentView();
-  updateStorageInfo();
-}
-
-// ==================== ОТПРАВКА ФАЙЛОВ ДРУГИМ ПОЛЬЗОВАТЕЛЯМ ====================
-
-function showShareModal() {
-  document.getElementById("shareModal").classList.add("active");
-  document.getElementById("shareFileInput").value = "";
-  selectedShareFile = null;
-  document.getElementById("selectedFileInfo").classList.add("hidden");
-}
-
-function closeShareModal() {
-  document.getElementById("shareModal").classList.remove("active");
-  selectedShareFile = null;
-}
-
-function handleShareFileSelect(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  if (file.size > 5 * 1024 * 1024) {
-    alert("Файл слишком большой! Максимум 5 МБ");
-    event.target.value = "";
-    return;
-  }
-
-  selectedShareFile = file;
-  document.getElementById("selectedFileInfo").classList.remove("hidden");
-  document.getElementById("selectedFileName").textContent =
-    `${file.name} (${formatSize(file.size)})`;
-}
-
-async function sendFileToOwner() {
-  if (!selectedShareFile) {
-    alert("Выберите файл");
-    return;
-  }
-
-  // Находим владельца диска (первого зарегистрированного пользователя или конкретного)
-  const usersSnapshot = await db.collection("users").limit(1).get();
-
-  if (usersSnapshot.empty) {
-    alert("В системе нет пользователей");
-    return;
-  }
-
-  // Берем первого пользователя как "владельца" (или можно задать конкретный email)
-  const ownerDoc = usersSnapshot.docs[0];
-  const ownerId = ownerDoc.id;
-  const ownerData = ownerDoc.data();
-
-  const reader = new FileReader();
-  reader.onload = async function (e) {
-    const sharedFile = {
-      name: selectedShareFile.name,
-      size: selectedShareFile.size,
-      type: selectedShareFile.type,
-      data: e.target.result,
-      senderId: currentUser.uid,
-      senderName: currentUserData.name,
-      senderEmail: currentUser.email,
-      recipientId: ownerId,
-      uploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    };
-
-    await db.collection("sharedFiles").add(sharedFile);
-
-    alert(
-      `Файл "${selectedShareFile.name}" отправлен пользователю ${ownerData.name}!`,
-    );
-    closeShareModal();
-  };
-  reader.readAsDataURL(selectedShareFile);
-}
-
-async function downloadSharedFile(fileId) {
-  const doc = await db.collection("sharedFiles").doc(fileId).get();
-  if (doc.exists && doc.data().data) {
-    const file = doc.data();
-    const link = document.createElement("a");
-    link.href = file.data;
-    link.download = file.name;
-    link.click();
-  }
-}
-
-async function deleteSharedFile(fileId) {
-  if (!confirm("Удалить файл?")) return;
-  await db.collection("sharedFiles").doc(fileId).delete();
-  loadCurrentView();
-  updateSharedBadge();
-}
-
-// ==================== СОЗДАНИЕ ПАПКИ ====================
-
-function showCreateFolderModal() {
-  document.getElementById("folderModal").classList.add("active");
-  document.getElementById("folderNameInput").value = "";
-  document.getElementById("folderNameInput").focus();
-}
-
-function closeFolderModal() {
-  document.getElementById("folderModal").classList.remove("active");
-}
-
-async function createFolder() {
-  const name = document.getElementById("folderNameInput").value.trim();
-  if (!name) {
-    alert("Введите название папки");
-    return;
-  }
-
-  const newFolder = {
-    id: "folder_" + Date.now(),
-    name: name,
-    ownerId: currentUser.uid,
-    files: [],
-  };
-
-  const folders = currentUserData.folders || [];
-  folders.push(newFolder);
-
-  await db
-    .collection("users")
-    .doc(currentUser.uid)
-    .update({ folders: folders });
-
-  closeFolderModal();
-  loadCurrentView();
-}
-
-// Закрытие модалок при клике вне их
-window.onclick = function (event) {
-  if (event.target.classList.contains("modal")) {
-    event.target.classList.remove("active");
-  }
-};
-
-document.getElementById("folderNameInput").onkeypress = function (e) {
-  if (e.key === "Enter") createFolder();
-};
+});
