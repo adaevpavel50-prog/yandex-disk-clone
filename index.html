@@ -1,82 +1,314 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Облачный Диск - Практическая работа</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <!-- ЭКРАН АВТОРИЗАЦИИ / РЕГИСТРАЦИИ -->
-    <div id="authScreen" class="screen active">
-        <div class="auth-box">
-            <h1>☁️ МойДиск</h1>
-            <h2 id="authTitle">Вход в систему</h2>
-            <div id="authMessage" class="message hidden"></div>
-            
-            <form id="authForm">
-                <div class="form-group hidden" id="nameGroup">
-                    <label>Ваше имя (будет названием папки)</label>
-                    <input type="text" id="regName" required placeholder="Иван Иванов">
-                </div>
-                <div class="form-group">
-                    <label>Email</label>
-                    <input type="email" id="authEmail" required placeholder="user@example.com">
-                </div>
-                <div class="form-group">
-                    <label>Пароль</label>
-                    <input type="password" id="authPassword" required minlength="4" placeholder="Минимум 4 символа">
-                </div>
-                <button type="submit" class="btn btn-primary" id="authBtn">Войти</button>
-            </form>
-            <button class="btn btn-secondary" id="toggleAuthBtn">Нет аккаунта? Зарегистрироваться</button>
-            
-            <div class="owner-hint">
-                <p>🔑 Для входа как Преподаватель (Владелец):</p>
-                <p>Email: <b>owner@disk.com</b> | Пароль: <b>owner123</b></p>
-            </div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>МойДиск - Облачное хранилище</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Страница авторизации/регистрации -->
+    <div id="authPage" class="auth-container">
+      <div class="auth-box">
+        <div class="logo">️ МойДиск</div>
+        <h2 id="authTitle">Вход в аккаунт</h2>
+
+        <div id="errorMessage" class="error-message hidden"></div>
+
+        <form id="authForm">
+          <div class="form-group" id="nameGroup" style="display: none">
+            <label>Ваше имя</label>
+            <input type="text" id="nameInput" placeholder="Иван Иванов" />
+          </div>
+
+          <div class="form-group">
+            <label>Email</label>
+            <input
+              type="email"
+              id="emailInput"
+              placeholder="example@mail.com"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label>Пароль</label>
+            <input
+              type="password"
+              id="passwordInput"
+              placeholder="Минимум 6 символов"
+              required
+              minlength="6"
+            />
+          </div>
+
+          <div
+            class="form-group"
+            id="confirmPasswordGroup"
+            style="display: none"
+          >
+            <label>Подтвердите пароль</label>
+            <input
+              type="password"
+              id="confirmPasswordInput"
+              placeholder="Повторите пароль"
+              minlength="6"
+            />
+          </div>
+
+          <button type="submit" class="btn" id="authBtn">Войти</button>
+        </form>
+
+        <button class="btn btn-secondary" id="toggleAuthBtn">
+          Создать аккаунт
+        </button>
+      </div>
+    </div>
+
+    <!-- Главный интерфейс диска -->
+    <div id="diskPage" class="disk-container hidden">
+      <!-- Боковая панель -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h1>Диск</h1>
         </div>
+
+        <div class="sidebar-actions">
+          <button
+            class="sidebar-btn upload-btn"
+            onclick="document.getElementById('fileInput').click()"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            Загрузить
+          </button>
+          <button
+            class="sidebar-btn create-btn"
+            onclick="showCreateFolderModal()"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            Создать
+          </button>
+        </div>
+
+        <nav class="sidebar-nav">
+          <a
+            href="#"
+            class="nav-item active"
+            onclick="switchView('recent', this)"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            Последние
+          </a>
+          <a href="#" class="nav-item" onclick="switchView('files', this)">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+              ></path>
+            </svg>
+            Файлы
+          </a>
+          <a href="#" class="nav-item" onclick="switchView('shared', this)">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+            Общие файлы
+            <span class="badge" id="sharedBadge" style="display: none">0</span>
+          </a>
+          <a href="#" class="nav-item" onclick="switchView('trash', this)">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path
+                d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+              ></path>
+            </svg>
+            Корзина
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="storage-info">
+            <div class="storage-bar">
+              <div
+                class="storage-bar-fill"
+                id="storageBar"
+                style="width: 0%"
+              ></div>
+            </div>
+            <p class="storage-text" id="storageText">0 МБ из 5 ГБ</p>
+          </div>
+          <div class="user-info">
+            <span id="userName">Пользователь</span>
+            <button class="logout-btn" onclick="logout()">Выйти</button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Основной контент -->
+      <main class="main-content">
+        <div class="top-bar">
+          <div class="breadcrumb" id="currentPath">Последние</div>
+          <div class="actions">
+            <button class="btn-icon" title="Поиск">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.35-4.35"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="content-area">
+          <div id="emptyState" class="empty-state">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <path
+                d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+              ></path>
+            </svg>
+            <h3>Нет файлов</h3>
+            <p>Загрузите файлы или получите от других пользователей</p>
+          </div>
+
+          <div id="filesGrid" class="files-grid hidden"></div>
+        </div>
+      </main>
     </div>
 
-    <!-- ЭКРАН ДИСКА (РАБОЧАЯ ОБЛАСТЬ) -->
-    <div id="diskScreen" class="screen">
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <h2>☁️ МойДиск</h2>
-            </div>
-            <nav class="sidebar-nav">
-                <a href="#" class="nav-item active" id="navMyFolder">📁 Моя папка</a>
-                <a href="#" class="nav-item hidden" id="navAllFolders">📂 Все папки пользователей (Владелец)</a>
-            </nav>
-            <div class="sidebar-footer">
-                <div class="user-info">
-                    <span id="displayUserName">Пользователь</span>
-                    <span id="displayUserEmail" class="email-text"></span>
-                </div>
-                <button class="btn btn-logout" onclick="logout()">Выйти</button>
-            </div>
-        </aside>
-
-        <main class="main-content">
-            <header class="top-bar">
-                <h2 id="pageTitle">Моя папка</h2>
-                <button class="btn btn-upload" id="uploadBtn" onclick="document.getElementById('fileInput').click()">
-                    ⬆️ Загрузить файл
-                </button>
-                <input type="file" id="fileInput" hidden onchange="handleFileUpload(event)">
-            </header>
-
-            <div class="content-area" id="contentArea">
-                <div class="empty-state" id="emptyState">
-                    <div class="empty-icon">📂</div>
-                    <h3>Папка пуста</h3>
-                    <p>Загрузите первый файл, нажав кнопку выше</p>
-                </div>
-                <div class="items-grid" id="itemsGrid"></div>
-            </div>
-        </main>
+    <!-- Модальное окно создания папки -->
+    <div id="folderModal" class="modal hidden">
+      <div class="modal-content">
+        <h3>Создать новую папку</h3>
+        <input
+          type="text"
+          id="folderNameInput"
+          placeholder="Название папки"
+          autofocus
+        />
+        <div class="modal-buttons">
+          <button class="btn-modal btn-primary" onclick="createFolder()">
+            Создать
+          </button>
+          <button class="btn-modal btn-secondary" onclick="closeFolderModal()">
+            Отмена
+          </button>
+        </div>
+      </div>
     </div>
+
+    <!-- Модальное окно отправки файла -->
+    <div id="shareModal" class="modal hidden">
+      <div class="modal-content">
+        <h3>Отправить файл владельцу диска</h3>
+        <div class="form-group">
+          <label>Выберите файл</label>
+          <input
+            type="file"
+            id="shareFileInput"
+            onchange="handleShareFileSelect(event)"
+          />
+        </div>
+        <div
+          id="selectedFileInfo"
+          class="hidden"
+          style="
+            margin: 12px 0;
+            padding: 12px;
+            background: #e8f5e9;
+            border-radius: 8px;
+          "
+        >
+          <strong>Выбран:</strong> <span id="selectedFileName"></span>
+        </div>
+        <div class="modal-buttons">
+          <button class="btn-modal btn-primary" onclick="sendFileToOwner()">
+            Отправить
+          </button>
+          <button class="btn-modal btn-secondary" onclick="closeShareModal()">
+            Отмена
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <input
+      type="file"
+      id="fileInput"
+      style="display: none"
+      onchange="handleFileUpload(event)"
+    />
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
 
     <script src="script.js"></script>
-</body>
+  </body>
 </html>
